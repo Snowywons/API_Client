@@ -1,0 +1,491 @@
+<!--
+    Noms des équipiers: Jimi-Luc Denis, Julie-Anne Castonguay
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta author="Nicolas Chourot">
+        <meta http-equiv="Content-Type" content="text/html; charset= ISO-8859-1">
+        <title>Gestionnaire de favoris</title>
+
+        <!-- Latest compiled and minified CSS -->
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+
+        <!-- Style pour les infobulles -->
+        <link rel="stylesheet" href="css/tooltip.css">
+
+        <!-- Style pour l'interface et la liste des favoris -->
+        <link rel="stylesheet" href="css/bookmarkManagerLayout.css">
+
+        <!-- pour le dialogue de confirmation de retrait d'un favoris -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery-confirm/3.3.2/jquery-confirm.min.css">
+
+        <!-- lien vers le favicon généré par https://favicon.io/favicon-converter/ -->
+        <link rel="icon" href="bookmark.ico">
+
+    </head>
+    <body>
+        <!-- Entête de la liste de favoris -->
+        <div class="container">
+            <div class="appHeader">
+                <h1><img src="bookmark.ico" alt="Image introuvable" style="width:100px; height:100px">&nbsp;Gestionnaire de favoris</h1>
+            </div>
+            
+            <div class="array-container">
+                <div class="header-container">
+                    <div id="searchBar">
+                        <label>Rechercher </label>
+                        <input type="text" id="searchInputName" placeholder="Nom" class="form-control"/>
+                        <input type="text" id="searchInputCategory" placeholder="Catégorie" class="form-control"/>
+                        <button id="searchBookmarkCmd"
+                            tooltip="Rechercher" tooltip-position="left">
+                            <span class="glyphicon glyphicon-search"></span>
+                        </button>
+                        <button id="cancelSearchBookmarkCmd"
+                            tooltip="Effacer" tooltip-position="left">
+                            <span class="glyphicon glyphicon-repeat"></span>
+                        </button>
+                    </div>
+                    <div class="header-bookmarks-container">
+                        <div id="headerName" class="headerTitles">Nom</div>
+                        <div id="headerUrl" class="headerTitles">Url</div>
+                        <div id="headerCategory" class="headerTitles">Catégorie</div>
+                        <div>
+                            <button id="showAddBookmarkFormCmd"
+                                    tooltip="Ajouter un favoris" tooltip-position="left">
+                                <span class="glyphicon glyphicon-plus"></span>
+                            </button>
+                        </div>
+                        <div>&nbsp;</div>
+                    </div>
+                </div>
+                <div class="form-container">
+                    <div class="form-bookmark-container" id="bookmarkForm">
+                        <!--
+                        Formulaire de saisie/modification de favoris:
+                        Contient les contrôles de saisie de favoris.
+                        Notez qu'il sera masqué et n'apparaitra que dans le mode d'ajout ou modification
+                        de favoris.
+                        -->
+                        <!-- champ masqué qui recevra le id d'un favoris à modifier -->
+                        <input type="hidden" id="Id" />
+                        <div>
+                            <input type="text" id="Name" placeholder="Nom" class="form-control"/>
+                        </div>
+                        <div>
+                            <input type="text" id="Url" placeholder="Url"  class="phone form-control"/>
+                        </div>
+                        <div>
+                            <input type="text" id="Category" placeholder="Catégorie" class="form-control"/>
+                        </div>
+                        <div>
+                            <!-- Noter que un seul des boutons suivants sera affiché selon le mode d'ajout ou de modification -->
+                            <!-- bouton de commande d'ajout de favoris -->
+                            <button id="addBookmarkCmd" tooltip="Ajouter" tooltip-position="left">
+                                <span class="glyphicon glyphicon glyphicon-ok"></span>
+                            </button>
+                            <!-- bouton de commande de modification de favoris -->
+                            <button id="modifyBookmarkCmd" tooltip="Modifier" tooltip-position="left">
+                                <span class="glyphicon glyphicon-ok"></span>
+                            </button>
+                        </div>
+                        <div>
+                            <!-- bouton de commande d'annulation d'ajout ou de modification de favoris -->
+                            <button id="cancelCmd" tooltip="Annuler" tooltip-position="left">
+                                <span  class="glyphicon glyphicon-repeat"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="bookmark-list-scroll-containter">
+                    <div class="bookmark-list-container" id="bookmarkList">
+                        <!-- La liste de favoris sera injectée ici par 
+                             la fonction JavaScript updateBookmarkList(...) -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fichier local qui contient la librairie jQuery -->
+        <script src="js/jquery-3.3.1.js"></script>
+        <!-- Fichier local qui contient la librairie de Validation -->
+        <script src="js/Validation.js"></script>
+        <!-- Fichier local qui contient les fonctions de requête au service Web API -->
+        <script src="js/bookmarkManagerWebAPIRequest.js"></script>
+        <!-- Fichier local qui contient la librairie de dialogue de confirmation -->
+        <script src="js/jquery-confirm.js"></script>
+        <!-- Fichier local qui contient la librairie de gestion de champ masqué -->
+        <script src="js/jquery.maskedinput.js"></script>
+
+        <script>
+            "use strict";
+
+            $(document).ready(initUI);
+
+            let editMode = false;
+            let addMode = false;
+
+            // objet d'automatisation de la validation
+            let validationProvider;
+
+            // Initialisation de l'interface
+            function initUI() {
+                initValidation();
+                eraseForm();
+
+                // Gestionnaires du clic sur les boutons
+                $("#headerName").click(sortByName);
+                $("#headerCategory").click(sortByCategory);
+                $('#searchBookmarkCmd').click(getBookmarks);
+                $('#cancelSearchBookmarkCmd').click(eraseSearchBookmarkForm);
+
+                $('#addBookmarkCmd').click(addBookmark);
+                $('#showAddBookmarkFormCmd').click(showAddBookmarkForm);
+                $('#modifyBookmarkCmd').click(modifyBookmark);
+                $('#cancelCmd').click(eraseForm);
+                $('#Name').keypress(textInputAlphaFilter);
+
+                // Ajout d'un message d'attente de réponse du serveur.
+                // Cela peut prendre quelques secondes avant que le serveur Web
+                // redémarre après une longue période sans requête
+                insertWaitingStatus();
+
+                // Extraire la liste des favoris via le service web API
+                // et mettre à jour le tableau qui présente la liste de favoris
+                getBookmarks();
+            }
+
+            function insertWaitingStatus(){
+                $('#bookmarkList').empty();
+                $('#bookmarkList').append(  makeCell("En attente de réponse du service Web...", "waiting"));
+                $('#bookmarkList').append($('<img src="images/Loading_icon.gif" alt="waiting"/>'));
+            }
+
+            function insertErrorStatus(status){
+                $('#bookmarkList').empty()
+                $('#bookmarkList').append($('<img src="images/error.png" style="width:60px;margin:10px" alt="httpError"/>'));
+                $('#bookmarkList').append(makeCell("Erreur de requête au service Web...", "httpError"));
+                $('#bookmarkList').append(makeCell(status, "httpError"));
+            }
+
+            function initValidation() {
+                validationProvider = new ValidationProvider();
+                validationProvider.addControl("Name", validate_Name);
+                validationProvider.addControl("Url", validate_Url);
+                validationProvider.addControl("Category", validate_Category);
+            }
+
+            function resetValidation() {
+                validationProvider.reset();
+            }
+
+            function validate_Name(){
+                let TBX_Name = document.getElementById("Name");
+
+                if (TBX_Name.value === "")
+                    return "Nom manquant";
+
+                return "";
+            }
+
+            function validate_Url(){
+                let TBX_Url = document.getElementById("Url");
+
+                let urlRegex = ""; // TO DO
+
+                if (TBX_Url.value === "")
+                    return "Url manquant";
+
+                //if (!urlRegex.test(TBX_Url.value))
+                //    return "Url invalide";
+
+                return "";
+            }
+
+            function validate_Category(){
+                let TBX_Category = document.getElementById("Category");
+
+                if (TBX_Category.value === "")
+                    return "Catégorie manquante";
+
+                return "";
+            }
+
+            // Effacer les contrôles de saisie/modification d'un favoris
+            // et rétablir la visibilité des boutons
+            function eraseForm() {
+                addMode = false;
+                editMode = false;
+                resetValidation();
+
+                // rétablir la couleur de fond de toutes les rangées
+                $('.cell').removeClass('selectedRow');
+
+                // masquer le formulaire de saisie/modification de favoris
+                $('#bookmarkForm').hide(400);
+
+                // Rétablir la visibilité par défaut des boutons
+                $('#addBookmarkCmd').show();
+                $('#modifyBookmarkCmd').hide();
+                $('#showAddBookmarkFormCmd').show();
+
+                // Effacer les champs du formulaire
+                $('#Name').val('');
+                $('#Url').val('');
+                $('#Category').val('');
+
+                // Masquer tous les boutons des rangées de favoris
+                $('#bookmarkList button').hide();
+            }
+
+            function eraseSearchBookmarkForm() {
+                // Effacer les champs de recherche
+                $('#searchInputName').val('');
+                $('#searchInputCategory').val('');
+
+                getBookmarks();
+            }
+
+            // Requête au service web API: Liste des favoris
+            function getBookmarks() {
+                let params = getParams();
+                if (params)
+                    webAPI_getBookmarkParams(params, updateBookmarkList, insertErrorStatus);
+                else
+                    webAPI_getBookmarks(updateBookmarkList, insertErrorStatus);
+            }
+
+            // Afficher le formulaire pour la saisie de favoris
+            function showAddBookmarkForm() {
+                addMode = true;
+                $('#addBookmarkCmd').show();
+                $('#bookmarkForm').show(400);
+                $('#showAddBookmarkFormCmd').hide();
+            }
+
+            // Afficher le formulaire pour la modification de favoris
+            function showEditBookmarkForm(e){
+                editMode = true;
+                $('#addBookmarkCmd').hide();
+                $('#showAddBookmarkFormCmd').hide();
+                $('#bookmarkForm').show(400);
+
+                let bookmarkId = e.currentTarget.id.split('_')[1];
+
+                // Extraction du favoris de Id = bookmarkId via le service web API
+                webAPI_getBookmark(bookmarkId, setFormData);
+            }
+
+            function setFormData(bookmark) {
+                // peupler les contrôles de saisie
+                $('#Id').val(bookmark.Id); // input caché qui mémorise le Id du favoris
+                $('#Name').val(bookmark.Name);
+                $('#Url').val(bookmark.Url);
+                $('#Category').val(bookmark.Category);
+                $('#modifyBookmarkCmd').show();
+            }
+
+            // Retourne un objet favoris à partir des valeurs prélevées se trouvant dans les contrôles de saisie.
+            // Si le paramètre includeId est vrai, inclure le Id du favoris dans l'objet favoris retourné
+            function makeBookmarkFromForm(includeId = false) {
+                if (includeId) {
+                    // Récupération du Id du favoris dans le contrôle caché
+                    let bookmarkId = parseInt($('#Id').val());
+                    return {Id: bookmarkId, Name: $('#Name').val(), Url: $('#Url').val(), Category: $('#Category').val()};
+                }
+                return { Id: 0, Name: $('#Name').val(), Url: $('#Url').val(), Category: $('#Category').val()};
+            }
+
+            // Trier les favoris selon le nom
+            function sortByName() {
+                if ($("#headerName").hasClass("sorted"))
+                {
+                    $("#headerName").removeClass('sorted');
+                    $("#headerName").html("Nom");
+                    let params = getParams();
+                    if (params == "")
+                        webAPI_getBookmarks(updateBookmarkList, insertErrorStatus);
+                    else
+                        webAPI_getBookmarkParams(params, updateBookmarkList, insertErrorStatus);
+                }
+                else {
+                    sortByDefault();
+                    $("#headerName").addClass('sorted');
+                    $("#headerName").html("Nom <span class='glyphicon glyphicon-sort'></span>");
+                    webAPI_getBookmarkParams("sort=name" + getParams(), updateBookmarkList, insertErrorStatus);
+                }
+                console.log("Sorted by Name");
+            }
+
+            // Trier les favoris selon la catégorie
+            function sortByCategory() {
+                if ($("#headerCategory").hasClass("sorted"))
+                {
+                    $("#headerCategory").removeClass('sorted');
+                    $("#headerCategory").html("Catégorie");
+                    let params = getParams();
+                    if (params == "")
+                        webAPI_getBookmarks(updateBookmarkList, insertErrorStatus);
+                    else
+                        webAPI_getBookmarkParams(params, updateBookmarkList, insertErrorStatus);
+                }
+                else {
+                    sortByDefault();
+                    $("#headerCategory").addClass('sorted');
+                    $("#headerCategory").html("Catégorie <span class='glyphicon glyphicon-sort'></span>");
+                    webAPI_getBookmarkParams("sort=category" + getParams(), updateBookmarkList, insertErrorStatus);
+                }
+                console.log("Sorted by Category");
+            }
+
+            // Trier selon le filtre par défaut
+            function sortByDefault() {
+                // Désactiver tous les filtres
+                $("#headerName").removeClass('sorted');
+                $("#headerCategory").removeClass('sorted');
+                $("#headerName").html("Nom");
+                $("#headerCategory").html("Catégorie");
+            }
+
+            function getParams(params = "") {
+                let searchInputName = $("#searchInputName").val();
+                if (searchInputName)
+                    params += "&name=" + searchInputName.trim();
+
+                let searchInputCategory = $("#searchInputCategory").val();
+                if (searchInputCategory)
+                    params += "&category=" + searchInputCategory.trim();
+
+                return params;
+            }
+
+            // Ajout d'un favoris
+            function addBookmark() {
+                let bookmark = makeBookmarkFromForm();
+                if (validationProvider.isValid()) {
+                    webAPI_addBookmark(bookmark, getBookmarks, insertErrorStatus);
+                }
+            }
+
+            // Requête au service Web API: Modification d'un favoris
+            function modifyBookmark() {
+                // construction de l'objet favoris
+                let bookmark = makeBookmarkFromForm(true);
+                if (validationProvider.isValid()) {
+                    webAPI_modifyBookmark(bookmark, getBookmarks, insertErrorStatus);
+                }
+            }
+
+            // Après confirmation, requête au service Web API de retrait d'un favoris
+            function deleteBookmark(e) {
+                // Extraction du Id du favoris inscrit dans l'attribut id de l'élément déclencheur de l'événement click
+                let bookmarkId = parseInt(e.currentTarget.id.split('_')[1]);
+                webAPI_getBookmark(bookmarkId, confirmDeleteBookmark, insertErrorStatus);
+            }
+
+            function confirmDeleteBookmark(bookmark) {
+                $.confirm({
+                    title: 'Attention!',
+                    content: 'Effacer '+ bookmark.Name +'?',
+                    buttons: {
+                        confirmer: function () {
+                            webAPI_deleteBookmark(bookmark.Id, getBookmarks, insertErrorStatus);
+                        },
+                        annuler: {},
+                    }
+                });
+            }
+
+            // Sur le survol d'une rangée, faire apparaître les boutons edit et delete
+            function cellOver(e){
+                if (!addMode && !editMode) {
+                    // currentTarget.className contient en principe : 'row_x cell ...'
+                    let bookmarkId = e.currentTarget.className.split(' ')[0].split('_')[1];
+                    $('#edit_' + bookmarkId).show();
+                    $('#delete_' + bookmarkId).show();
+                    $('.row_' + bookmarkId).addClass('selectedRow');
+                }
+            }
+
+            // Sur le l'évacuation d'une rangée, faire disparaître les boutons edit et delete
+            function cellBlur(e){
+                if (!editMode) {
+                    // currentTarget.className contient en principe : 'row_x cell ...'
+                    let bookmarkId = e.currentTarget.className.split(' ')[0].split('_')[1];
+                    $('#edit_' + bookmarkId).hide();
+                    $('#delete_' + bookmarkId).hide();
+                    $('.row_' + bookmarkId).removeClass('selectedRow');
+                }
+            }
+
+            function makeTextCell(content, cssClass){
+                return $('<div class= "' + cssClass + '">' + content + '</div>');
+            }
+
+            function makeFaviconCell(content, cssClass){
+                return $("<div class='" + cssClass + "''><img class='favicon' src='https://www.google.com/s2/favicons?sz=32&domain=" + content + "'> " + content + "</div>");
+            }
+
+            function makeCell(cssClass){
+                return $('<div class= "' + cssClass + '"></div>');
+            }
+
+            function makeButton(cssClass, id, tooltip) {
+                return $('<button id="' + id + '" class="'+ cssClass + '"tooltip="' + tooltip + '" tooltip-position="left"></button>');
+            }
+
+            function makeGlyphIcon(glyphIconId){
+                return $("<span class='glyphicon glyphicon-" + glyphIconId + "'></span>");
+            }
+
+            // Rafraichir la liste des favoris
+            // paramètre bookmarks: tableau d'objets favoris
+            function updateBookmarkList(bookmarks) {
+                eraseForm();
+                var oddRow = true;
+                // effacer le tableau affichant la liste de favoris
+                $('#bookmarkList').empty();
+
+                // pour tous les favoris du tableau bookmarks
+                bookmarks.forEach(bookmark => { // créer une nouvelle rangée
+
+                    // déterminer la couleur de la rangée
+                    let bgColorRow = "row_" + bookmark.Id + (oddRow?  " oddRow": " evenRow") + " cell "  ;
+
+                    // Distribution des données du favoris dans des cellules de la rangée
+                    $('#bookmarkList').append(makeTextCell(bookmark.Name,  bgColorRow + " ellipsis"));
+                    $('#bookmarkList').append(makeFaviconCell(bookmark.Url, bgColorRow + " ellipsis"));
+                    $('#bookmarkList').append(makeTextCell(bookmark.Category, bgColorRow + " ellipsis"));
+
+                    // Bouton d'appel à la modification du favoris
+                    $('#bookmarkList')
+                        .append(makeCell(bgColorRow)
+                        .append(makeButton("editBookmarkCmd", "edit_" + bookmark.Id ,"Modifier " + bookmark.Name)
+                        .append(makeGlyphIcon('pencil'))));
+
+                    // Bouton d'appel au retrait du favoris
+                    $('#bookmarkList')
+                        .append(makeCell(bgColorRow)
+                        .append(makeButton("deleteBookmarkCmd", "delete_" + bookmark.Id ,"Effacer " + bookmark.Name)
+                        .append(makeGlyphIcon('remove'))));
+
+                    oddRow = !oddRow;
+               });
+
+               // Attacher les gestionnaires du clic aux nouveaux boutons
+               $('.editBookmarkCmd').click(showEditBookmarkForm);
+               $('.deleteBookmarkCmd').click(deleteBookmark);
+               $('#bookmarkList button').hide();
+               $('input').on("paste", function(e) { e.preventDefault(); });
+
+               // Attacher les événements pour mettre en surbrillance la rangée survolée
+               // et faire apparaitre les icons d'édition et de retrait
+               $('.cell').mouseover(cellOver);
+               $('.cell').mouseleave(cellBlur);
+            }
+
+        </script>
+    </body>
+</html>
